@@ -864,6 +864,26 @@ test("generates an optional Gatekeeper from its upstream config", async () => {
   assert.deepEqual(generateConfigs(validConfig, await baseConfigs(), catalog).gatekeepers, {});
 });
 
+test("generates VPC Service bindings for optional Gatekeepers", async () => {
+  const serviceId = "01a1e8d9-e090-7491-86fb-06b1b5658ad0";
+  const withVpc = variant((c) => {
+    c.gatekeepers = {
+      github: {
+        name: "acme-cloudflare-os-github",
+        vars: { GITHUB_URL: "https://github.example.com" },
+        vpcServices: [{ serviceId }],
+      },
+    };
+  });
+
+  const generated = generateConfigs(withVpc, await baseConfigs(), catalog).gatekeepers.github;
+  assert.deepEqual(generated.vpc_services, [{ binding: "GITHUB_VPC", service_id: serviceId, remote: true }]);
+  assert.deepEqual(generated.vars, {
+    GITHUB_URL: "https://github.example.com",
+    BASE_URL: "https://os.example.com/gatekeeper/github",
+  });
+});
+
 test("routes an optional Gatekeeper's own Workers AI binding through the Workshop's gateway", async () => {
   const google = variant((c) => { c.gatekeepers = { google: { name: "acme-cloudflare-os-google" } }; });
   const withGoogle = testCatalogWithGoogle();
@@ -918,11 +938,25 @@ test("rejects a malformed gatekeepers block", () => {
   rejects({ github: "acme-gk-github" }, /gatekeepers.github must be an object/);
   rejects({ github: { name: 42 } }, /gatekeepers.github.name must be a Worker name/);
   rejects({ github: {} }, /gatekeepers.github.name must be a Worker name/);
-  rejects({ github: { name: "acme-gk-github", secrets: {} } }, /only name and vars are allowed, not secrets/);
+  rejects({ github: { name: "acme-gk-github", secrets: {} } }, /only name, vars and vpcServices are allowed, not secrets/);
   rejects({ github: { name: "acme-gk-github", vars: [] } }, /gatekeepers.github.vars must be an object/);
   rejects({ github: { name: "acme-gk-github", vars: { GITHUB_ORG: 1 } } }, /gatekeepers.github.vars.GITHUB_ORG must be a string/);
   rejects({ github: { name: "acme-gk-github", vars: { BASE_URL: "https://elsewhere.example.com" } } },
     /gatekeepers.github.vars.BASE_URL: the deploy sets it/);
+  rejects({ github: { name: "acme-gk-github", vpcServices: {} } }, /gatekeepers.github.vpcServices must be an array/);
+  rejects({ github: { name: "acme-gk-github", vpcServices: ["GITHUB_VPC"] } }, /gatekeepers.github.vpcServices.0 must be an object/);
+  rejects({ github: { name: "acme-gk-github", vpcServices: [{ binding: "GITHUB_VPC", service_id: "01a1e8d9-e090-7491-86fb-06b1b5658ad0" }] } },
+    /only serviceId is allowed, not binding, service_id. The binding is always GITHUB_VPC and remote is always true/);
+  rejects({ github: { name: "acme-gk-github", vpcServices: [{ binding: "github-vpc", serviceId: "01a1e8d9-e090-7491-86fb-06b1b5658ad0" }] } },
+    /only serviceId is allowed, not binding. The binding is always GITHUB_VPC and remote is always true/);
+  rejects({ github: { name: "acme-gk-github", vpcServices: [{ serviceId: "not-a-service" }] } },
+    /gatekeepers.github.vpcServices.0.serviceId must be a Workers VPC Service ID/);
+  rejects({ github: { name: "acme-gk-github", vpcServices: [{ serviceId: "01a1e8d9-e090-7491-86fb-06b1b5658ad0", remote: "yes" }] } },
+    /only serviceId is allowed, not remote. The binding is always GITHUB_VPC and remote is always true/);
+  rejects({ github: { name: "acme-gk-github", vpcServices: [
+    { serviceId: "01a1e8d9-e090-7491-86fb-06b1b5658ad0" },
+    { serviceId: "11a1e8d9-e090-7491-86fb-06b1b5658ad0" },
+  ] } }, /gatekeepers.github.vpcServices may contain only one service; it becomes the GITHUB_VPC binding/);
   rejects({ github: { name: "Acme GitHub" } }, /Worker names must use lowercase/);
   // Names are unique across workers and gatekeepers alike.
   rejects({ github: { name: validConfig.workers.workshop.name } },
@@ -934,6 +968,15 @@ test("rejects a malformed gatekeepers block", () => {
 
   assert.doesNotThrow(() => validateConfig(withGatekeepers({})));
   assert.doesNotThrow(() => validateConfig(withOptional));
+});
+
+test("rejects optional Gatekeeper VPC binding collisions", async () => {
+  const serviceId = "01a1e8d9-e090-7491-86fb-06b1b5658ad0";
+  const bases = await baseConfigs();
+
+  assert.throws(() => generateConfigs(variant((c) => {
+    c.gatekeepers = { github: { name: "acme-gk-github", vars: { GITHUB_VPC: "oops" }, vpcServices: [{ serviceId }] } };
+  }), bases, catalog), /gatekeepers.github: Worker binding GITHUB_VPC conflicts with a var of the same name/);
 });
 
 test("rejects a Gatekeeper the catalog does not offer, or vars it would not take", () => {

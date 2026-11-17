@@ -3,6 +3,7 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { parse } from "jsonc-parser";
 import { secretSetup, UNDECLARED_VARS, undeclaredVarWarnings } from "./core/gatekeepers.ts";
 import { loadCatalog } from "./gatekeeper-catalog.ts";
 import { testCatalogWithGitlab } from "./test-support.ts";
@@ -39,6 +40,7 @@ test("offers upstream's installable Gatekeepers, as the hosted catalog would", a
   assert.deepEqual(github.vars, []);
   assert.equal(github.singleton, false);
   assert.ok(github.config.migrations!.length > 0);
+  assert.equal(github.config.vpc_services, undefined);
 
   // Without a deploy-inputs.json, upstream's default OAuth credentials.
   const linear = catalog.offered.find((gatekeeper) => gatekeeper.slug === "linear")!;
@@ -84,7 +86,7 @@ test("excludes, without throwing, what upstream's rules or the starter cannot ha
   const packages = join(root, "cloudflare-os", "packages");
   const edit = (name: string, change: (config: Record<string, unknown>) => void) => {
     const path = join(packages, name, "wrangler.jsonc");
-    const config = JSON.parse(readFileSync(path, "utf8").replace(/^\s*\/\/.*$/gm, "")) as Record<string, unknown>;
+    const config = parse(readFileSync(path, "utf8"), undefined, { allowTrailingComma: true }) as Record<string, unknown>;
     change(config);
     writeFileSync(path, JSON.stringify(config));
   };

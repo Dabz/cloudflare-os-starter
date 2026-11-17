@@ -94,6 +94,11 @@ function gatekeeperBinding(slug: string): string {
   return `GATEKEEPER_${slug.toUpperCase()}`;
 }
 
+/** The optional Gatekeeper's private-network binding. */
+function gatekeeperVpcBinding(slug: string): string {
+  return `${slug.toUpperCase()}_VPC`;
+}
+
 /**
  * The generated config's file name, beside each base `wrangler.jsonc`. One deployment per checkout;
  * use separate worktrees for concurrent deploys.
@@ -439,28 +444,80 @@ function validateGatekeeperEntries(config: DeploymentConfig): void {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
       throw new Error(`gatekeepers.${slug} must be an object with a name.`);
     }
-    const unknown = Object.keys(entry).filter((key) => key !== "name" && key !== "vars");
+    const unknown = Object.keys(entry).filter((key) => !["name", "vars", "vpcServices"].includes(key));
     if (unknown.length) {
-      throw new Error(`gatekeepers.${slug}: only name and vars are allowed, not ${unknown.join(", ")}.`);
+      throw new Error(`gatekeepers.${slug}: only name, vars and vpcServices are allowed, not ${unknown.join(", ")}.`);
     }
-    const { name, vars } = entry as { name?: unknown; vars?: unknown };
+    const { name, vars, vpcServices } = entry as { name?: unknown; vars?: unknown; vpcServices?: unknown };
     if (typeof name !== "string" || !name) {
       throw new Error(`gatekeepers.${slug}.name must be a Worker name.`);
     }
-    if (vars === undefined) continue;
-    if (!vars || typeof vars !== "object" || Array.isArray(vars)) {
-      throw new Error(`gatekeepers.${slug}.vars must be an object of strings.`);
-    }
-    for (const [key, value] of Object.entries(vars)) {
-      if (key === "BASE_URL") {
-        throw new Error(
-          `gatekeepers.${slug}.vars.BASE_URL: the deploy sets it, to <public origin>/gatekeeper/${slug}. ` +
-          "Remove it.");
+    if (vars !== undefined) {
+      if (!vars || typeof vars !== "object" || Array.isArray(vars)) {
+        throw new Error(`gatekeepers.${slug}.vars must be an object of strings.`);
       }
-      if (typeof value !== "string") {
-        throw new Error(`gatekeepers.${slug}.vars.${key} must be a string.`);
+      for (const [key, value] of Object.entries(vars)) {
+        if (key === "BASE_URL") {
+          throw new Error(
+            `gatekeepers.${slug}.vars.BASE_URL: the deploy sets it, to <public origin>/gatekeeper/${slug}. ` +
+            "Remove it.");
+        }
+        if (typeof value !== "string") {
+          throw new Error(`gatekeepers.${slug}.vars.${key} must be a string.`);
+        }
       }
     }
+    if (vpcServices === undefined) continue;
+    if (!Array.isArray(vpcServices)) {
+      throw new Error(`gatekeepers.${slug}.vpcServices must be an array.`);
+    }
+    if (vpcServices.length > 1) {
+      throw new Error(`gatekeepers.${slug}.vpcServices may contain only one service; it becomes the ${gatekeeperVpcBinding(slug)} binding.`);
+    }
+    const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    for (const [index, service] of vpcServices.entries()) {
+      const path = `gatekeepers.${slug}.vpcServices.${index}`;
+      if (!service || typeof service !== "object" || Array.isArray(service)) {
+        throw new Error(`${path} must be an object.`);
+      }
+      const unknownServiceKeys = Object.keys(service).filter((key) => key !== "serviceId");
+      if (unknownServiceKeys.length) {
+        throw new Error(`${path}: only serviceId is allowed, not ${unknownServiceKeys.join(", ")}. The binding is always ${gatekeeperVpcBinding(slug)} and remote is always true.`);
+      }
+      const { serviceId } = service as { serviceId?: unknown };
+      if (typeof serviceId !== "string" || !uuidPattern.test(serviceId)) {
+        throw new Error(`${path}.serviceId must be a Workers VPC Service ID.`);
+      }
+    }
+  }
+}
+
+function configBindingNames(config: ProdWranglerConfig): string[] {
+  return [
+    ...(config.kv_namespaces ?? []).map((binding) => binding.binding),
+    ...(config.r2_buckets ?? []).map((binding) => binding.binding),
+    ...(config.worker_loaders ?? []).map((binding) => binding.binding),
+    ...(config.services ?? []).map((binding) => binding.binding),
+    ...(config.vpc_services ?? []).map((binding) => binding.binding),
+    ...(config.browser ? [config.browser.binding] : []),
+    ...(config.version_metadata ? [config.version_metadata.binding] : []),
+    ...(config.ai ? [config.ai.binding] : []),
+    ...("artifacts" in config
+      ? (Array.isArray(config.artifacts) ? config.artifacts : config.artifacts ? [config.artifacts] : []).map((binding) => binding.binding)
+      : []),
+  ];
+}
+
+function validateGeneratedBindings(path: string, config: ProdWranglerConfig): void {
+  const bindings = configBindingNames(config);
+  const duplicate = bindings.find((binding, index) => bindings.indexOf(binding) !== index);
+  if (duplicate !== undefined) {
+    throw new Error(`${path}: Worker binding ${duplicate} is configured more than once.`);
+  }
+  const vars = Object.keys(config.vars ?? {});
+  const collision = bindings.find((binding) => vars.includes(binding));
+  if (collision !== undefined) {
+    throw new Error(`${path}: Worker binding ${collision} conflicts with a var of the same name.`);
   }
 }
 
@@ -804,6 +861,16 @@ export function generateConfigs(
       ...entry.vars,
       BASE_URL: `${origin}/gatekeeper/${slug}`,
     };
+    if (entry.vpcServices?.length) {
+      generated.vpc_services = entry.vpcServices.map((service) => ({
+        binding: gatekeeperVpcBinding(slug),
+        service_id: service.serviceId,
+        remote: true,
+      }));
+    } else {
+      delete generated.vpc_services;
+    }
+    validateGeneratedBindings(`gatekeepers.${slug}`, generated);
     gatekeepers[slug] = generated;
   }
 

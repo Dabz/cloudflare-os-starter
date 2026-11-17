@@ -230,6 +230,7 @@ Edit only the annotated, non-secret control surface unless the requested feature
 - Context Artifacts defaults to disabled when `enabled` is omitted; when enabled, keep its namespace stable. Omitting the namespace selects `gatekeeper-context-collections`, while `null` is invalid.
 - `customGatekeeper.message` is tracked and agent-readable. It is not a secret store.
 - Set release metadata only to a real deployment identifier; use `null` otherwise.
+- Optional Gatekeeper Workers can bind one existing Workers VPC Service with `gatekeepers.<slug>.vpcServices: [{ serviceId }]`. Do not put the binding name or `remote` in `deployment.jsonc`: the deploy derives `<SLUG>_VPC` (for example `GITHUB_VPC`) and always emits `remote: true`. Verify the VPC Service exists, belongs to the same account, and has the correct private target before deployment.
 
 Account IDs, administrator emails, hostnames, resource identifiers, and organization guidance are non-secret but potentially sensitive repository metadata. Confirm the repository audience before committing them.
 

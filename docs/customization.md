@@ -96,6 +96,16 @@ Each one is an entry under `gatekeepers`, keyed by its slug:
 - **The slug** is the hosted install slug (`gatekeeper-mcp-portal` is `mcpportal`). It names the `GATEKEEPER_<SLUG>` binding and the `/gatekeeper/<slug>` route.
 - **`name`** is its Worker's name, a permanent service identity like those under `workers`. `init` suggests `<router name>-gk-<slug>`, as the hosted flow names it.
 - **`vars`** are plain-text vars, merged over the package's own and replacing any set on the Worker another way; the deploy sets `BASE_URL`. One with a Workers AI binding of its own, such as Google's for reading Drive PDFs, also gets `CF_AI_GATEWAY`, set to `aiGateway.name` as for Web Search, unless `aiGateway.enabled` is `false` or the gateway is in another account; without it, those calls go through no gateway. The MCP portal needs `MCP_PORTAL_URL`: `init` asks for it, and `check` warns while it is unset.
+- **`vpcServices`** binds the Gatekeeper Worker to an existing Workers VPC Service. Put only the service ID in `deployment.jsonc`; the deploy derives the binding name as `<SLUG>_VPC`, for example `GITHUB_VPC`, and always emits `remote: true` for local development. GitHub Enterprise Server uses `GITHUB_URL` for the browser-facing origin, optional `GITHUB_API_URL` for the Worker-facing origin, and the generated `GITHUB_VPC` binding for private Worker fetches.
+  Example:
+
+  ```jsonc
+  "github": {
+    "name": "acme-os-gk-github",
+    "vars": { "GITHUB_URL": "https://github.example.com" },
+    "vpcServices": [{ "serviceId": "01a1e8d9-e090-7491-86fb-06b1b5658ad0" }]
+  }
+  ```
 - **Secrets go to the Worker, never into this file.** Register `<public origin>/gatekeeper/<slug>/oauth` as the redirect URI of an OAuth app with the provider, then run `pnpm cf-os secrets <slug>`; `init` offers this when you deploy. By hand, after the first deploy:
 
   ```sh

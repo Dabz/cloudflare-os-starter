@@ -260,6 +260,7 @@ function upstreamJsonc<T>(path: string): T {
 /** Upstream package `dir`'s catalog entry, as `loadCatalog` reads it, with the OAuth inputs it reads when `oauth`. */
 function offeredGatekeeper(slug: string, dir: string, packageName: string, singleton: boolean, oauth = false) {
   const packageDir = `cloudflare-os/packages/${dir}`;
+  const { vpc_services: _vpcServices, ...config } = upstreamJsonc<ProdWranglerConfig>(`${packageDir}/wrangler.jsonc`);
   return {
     slug,
     packageDir,
@@ -269,7 +270,7 @@ function offeredGatekeeper(slug: string, dir: string, packageName: string, singl
     secrets: oauth ? upstreamJsonc<GatekeeperCatalog["offered"][number]["secrets"]>(`${packageDir}/deploy-inputs.json`) : [],
     vars: [],
     readme: `${packageDir}/README.md`,
-    config: upstreamJsonc<ProdWranglerConfig>(`${packageDir}/wrangler.jsonc`),
+    config,
   };
 }
 

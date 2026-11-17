@@ -5,7 +5,7 @@
 //
 // Every filter fails closed. A package upstream's own rules reject, or one needing something this
 // deploy does not provide, is listed in `excluded` with the reason, never offered: an offered
-// Gatekeeper has to deploy from nothing but a Worker name, vars and its secrets.
+// Gatekeeper has to deploy from nothing but a Worker name, vars, VPC Service IDs and its secrets.
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -13,6 +13,11 @@ import { parse, printParseErrorCode, type ParseError } from "jsonc-parser";
 import type { ProdWranglerConfig } from "./core/deployment-config.ts";
 import type { CatalogGatekeeper, ExcludedGatekeeper, GatekeeperCatalog } from "./core/gatekeepers.ts";
 import { BUILT_IN_GATEKEEPER_SLUGS } from "./core/naming.ts";
+
+function starterControlledConfig(config: ProdWranglerConfig): ProdWranglerConfig {
+  const { vpc_services: _vpcServices, ...controlled } = config;
+  return controlled;
+}
 
 /** Why a package's own config rules it out, or undefined when nothing does. */
 function unsupported(config: ProdWranglerConfig): string | undefined {
@@ -60,8 +65,8 @@ export async function loadCatalog(root: string): Promise<GatekeeperCatalog> {
       // Re-read strictly: upstream's scan parses best-effort, and a config the deploy cannot parse
       // is one it cannot deploy.
       const errors: ParseError[] = [];
-      const config = parse(readFileSync(join(pkg.dir, "wrangler.jsonc"), "utf8"), errors,
-        { allowTrailingComma: true }) as ProdWranglerConfig;
+      const config = starterControlledConfig(parse(readFileSync(join(pkg.dir, "wrangler.jsonc"), "utf8"), errors,
+        { allowTrailingComma: true }) as ProdWranglerConfig);
       if (errors.length) {
         exclude(`its wrangler.jsonc does not parse: ${printParseErrorCode(errors[0].error)} at offset ${errors[0].offset}`);
         continue;
@@ -70,7 +75,7 @@ export async function loadCatalog(root: string): Promise<GatekeeperCatalog> {
       // singleton and its inputs. It throws on a config key or input upstream has not decided about.
       const entry = lib.buildWorkerEntry({
         pkgName: pkg.name,
-        config: pkg.config,
+        config: starterControlledConfig(pkg.config),
         mainModule: pkg.config.main ?? "",
         modules: [],
         deployInputs: lib.readDeployInputs(pkg.dir),

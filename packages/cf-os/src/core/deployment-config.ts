@@ -157,6 +157,14 @@ export interface GatekeeperEntry {
    * never a secret: those go to the Worker with `wrangler secret put`.
    */
   vars?: Record<string, string>;
+  /** Workers VPC Service bindings attached to this Gatekeeper Worker. */
+  vpcServices?: GatekeeperVpcService[];
+}
+
+/** One Workers VPC Service binding on an optional Gatekeeper. */
+export interface GatekeeperVpcService {
+  /** Existing Workers VPC Service ID. */
+  serviceId: string;
 }
 
 /**
@@ -199,6 +207,8 @@ export type ProdWranglerConfig =
     secrets?: { required: string[] };
     /** Artifacts namespaces. An array, unlike upstream's single-binding declaration. */
     artifacts?: { binding: string; namespace: string }[];
+    /** Workers VPC Service bindings. */
+    vpc_services?: { binding: string; service_id: string; remote?: boolean }[];
   };
 
 /** The generated configs, keyed as `deployment.jsonc` keys them. */
